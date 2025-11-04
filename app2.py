@@ -1,58 +1,75 @@
 
-import pandas as pd
+import streamlit as st
 from influxdb_client import InfluxDBClient
-import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+from sklearn.linear_model import LinearRegression
+import plotly.express as px
 
-# --- Parámetros de conexión ---
-INFLUXDB_URL = "https://us-east-1-1.aws.cloud2.influxdata.com"
-INFLUXDB_TOKEN = "JcKXoXE30JQvV9Ggb4-zv6sQc0Zh6B6Haz5eMRW0FrJEduG2KcFJN9-7RoYvVORcFgtrHR-Q_ly-52pD7IC6JQ=="
-INFLUXDB_ORG = "0925ccf91ab36478"
-INFLUXDB_BUCKET = "EXTREME_MANUFACTURING"
+# -----------------------------
+# 1. CONFIGURACIÓN DE LA APP
+# -----------------------------
+st.set_page_config(layout="wide", page_title="Dashboard IoT - Producción")
 
-# --- Inicializar cliente ---
-client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG)
+st.title("📊 Digitalización de Plantas Productivas - Dashboard IoT")
+
+# -----------------------------
+# 2. CONEXIÓN A INFLUXDB
+# -----------------------------
+url = st.secrets["https://us-east-1-1.aws.cloud2.influxdata.com"]
+token = st.secrets["JcKXoXE30JQvV9Ggb4-zv6sQc0Zh6B6Haz5eMRW0FrJEduG2KcFJN9-7RoYvVORcFgtrHR-Q_ly-52pD7IC6JQ=="]
+org = st.secrets["0925ccf91ab36478"]
+bucket = st.secrets["EXTREME_MANUFACTURING"]
+
+client = InfluxDBClient(url=url, token=token, org=org)
 query_api = client.query_api()
 
-# --- Consulta de datos DHT22 ---
-query_dht22 = '''
-from(bucket: "EXTREME_MANUFACTURING")
-  |> range(start: -15d, stop: -10d)
-  |> filter(fn: (r) => r._measurement == "studio-dht22")
-  |> filter(fn: (r) => r._field == "humedad" or r._field == "temperatura" or r._field == "sensacion_termica")
+# -----------------------------
+# 3. CONSULTA DINÁMICA
+# -----------------------------
+rango = st.sidebar.selectbox("Seleccionar rango de tiempo", ["1h", "6h", "12h", "24h", "7d"])
+variable = st.sidebar.selectbox("Variable", ["temperature", "humidity", "vibration"])
+
+query = f'''
+from(bucket: "{bucket}")
+|> range(start: -{rango})
+|> filter(fn: (r) => r._measurement == "sensor_data")
+|> filter(fn: (r) => r._field == "{variable}")
 '''
 
-tables_dht22 = query_api.query(org=INFLUXDB_ORG, query=query_dht22)
-data_dht22 = []
-for table in tables_dht22:
-    for record in table.records:
-        data_dht22.append((record.get_time(), record.get_field(), record.get_value()))
+result = query_api.query_data_frame(org=org, query=query)
 
-# --- Consulta de datos MPU6050 ---
-query_mpu = '''
-from(bucket: "EXTREME_MANUFACTURING")
-  |> range(start: -8d, stop: -7d)
-  |> filter(fn: (r) => r._measurement == "mpu6050")
-  |> filter(fn: (r) =>
-      r._field == "accel_x" or r._field == "accel_y" or r._field == "accel_z" or
-      r._field == "gyro_x" or r._field == "gyro_y" or r._field == "gyro_z" or
-      r._field == "temperature")
-'''
+if result.empty:
+    st.warning("No hay datos disponibles para el rango seleccionado.")
+    st.stop()
 
-tables_mpu = query_api.query(org=INFLUXDB_ORG, query=query_mpu)
-data_mpu = []
-for table in tables_mpu:
-    for record in table.records:
+df = result[["_time", "_value"]].rename(columns={"_time": "fecha", "_value": variable})
+df["fecha"] = pd.to_datetime(df["fecha"])
 
-        # --- Visualización de datos DHT22 ---
-df_dht22 = pd.DataFrame(data_dht22, columns=["time", "field", "value"])
-df_dht22 = df_dht22.pivot(index="time", columns="field", values="value")
-df_dht22.plot(subplots=True, figsize=(10,6), title="Variables DHT22")
-plt.show()
+# -----------------------------
+# 4. VISUALIZACIÓN
+# -----------------------------
+fig = px.line(df, x="fecha", y=variable, title=f"📈 {variable} en el tiempo")
+st.plotly_chart(fig, use_container_width=True)
 
-# --- Visualización de datos MPU6050 ---
-df_mpu = pd.DataFrame(data_mpu, columns=["time", "field", "value"])
-df_mpu = df_mpu.pivot(index="time", columns="field", values="value")
-df_mpu.plot(subplots=True, figsize=(10,8), title="Variables MPU6050")
-plt.show()
+# -----------------------------
+# 5. MÉTRICAS (KPI)
+# -----------------------------
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Valor actual", round(df[variable].iloc[-1], 2))
+col2.metric("Promedio", round(df[variable].mean(), 2))
+col3.metric("Máximo", round(df[variable].max(), 2))
+col4.metric("Mínimo", round(df[variable].min(), 2))
 
-        data_mpu.append((record.get_time(), record.get_field(), record.get_value()))
+# -----------------------------
+# 6. MODELO PREDICTIVO (REGRESIÓN LINEAL)
+# -----------------------------
+df["index"] = np.arange(len(df))
+X = df[["index"]]
+y = df[[variable]]
+
+model = LinearRegression().fit(X, y)
+df["pred"] = model.predict(X)
+
+fig_pred = px.line(df, x="fecha", y=["pred", variable"], title="🔮 Predicción (Regresión Lineal)")
+st.plotly_chart(fig_pred, use_container_width=True)
