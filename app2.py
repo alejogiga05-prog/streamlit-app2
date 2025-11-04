@@ -15,10 +15,10 @@ st.title("Dashboard IoT - Digitalización de Plantas Productivas")
 # -------------------------------------------------------
 # CONEXIÓN A INFLUXDB (se toman desde Secrets de Streamlit)
 # -------------------------------------------------------
-url = st.secrets["INFLUX_URL"]
-token = st.secrets["INFLUX_TOKEN"]
-org = st.secrets["INFLUX_ORG"]
-bucket = st.secrets["INFLUX_BUCKET"]
+url = st.secrets["https://us-east-1-1.aws.cloud2.influxdata.com"]
+token = st.secrets["cKXoXE30JQvV9Ggb4-zv6sQc0Zh6B6Haz5eMRW0FrJEduG2KcFJN9-7RoYvVORcFgtrHR-Q_ly-52pD7IC6JQ=="]
+org = st.secrets["0925ccf91ab36478"]
+bucket = st.secrets["EXTREME_MANUFACTURING"]
 
 client = InfluxDBClient(url=url, token=token, org=org)
 query_api = client.query_api()
