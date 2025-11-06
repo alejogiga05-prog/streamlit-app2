@@ -1,89 +1,71 @@
-"""
-=========================================================
-Dashboard IoT – Digitalización de Plantas Productivas
-Autor: Alejandro Giraldo Garzón
-Descripción:
-    Aplicación Streamlit que se conecta a InfluxDB Cloud 
-    para consultar datos historizados de sensores industriales,
-    graficarlos y realizar regresión lineal.
-Versión: 1.0 (2025)
-=========================================================
-"""
-
-# =========================================
-# IMPORTS
-# =========================================
 import streamlit as st
-from influxdb_client import InfluxDBClient
 import pandas as pd
-import numpy as np
-from sklearn.linear_model import LinearRegression
 import plotly.express as px
+from influxdb_client import InfluxDBClient
 
+# --- Parámetros de conexión ---
+INFLUXDB_URL = st.secrets["INFLUXDB_URL"]
+INFLUXDB_TOKEN = st.secrets["INFLUXDB_TOKEN"]
+INFLUXDB_ORG = st.secrets["INFLUXDB_ORG"]
+INFLUXDB_BUCKET = st.secrets["INFLUXDB_BUCKET"]
 
-# =========================================
-# CONFIGURACIÓN DE PÁGINA
-# =========================================
-st.set_page_config(
-    page_title="Dashboard IoT | Digitalización de Plantas",
-    layout="wide"
-)
-st.title("Dashboard IoT – Digitalización de Plantas Productivas")
-
-
-# =========================================
-# CONEXIÓN A INFLUXDB (USANDO SECRETS)
-# =========================================
-url = "https://us-east-1-1.aws.cloud2.influxdata.com"
-token = st.secrets["INFLUX_TOKEN"]
-org = st.secrets["ORG"]
-bucket = st.secrets["BUCKET"]
-
-client = InfluxDBClient(url=url, token=token, org=org)
+# --- Inicializar cliente ---
+client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG)
 query_api = client.query_api()
 
+# --- Configuración lateral ---
+st.sidebar.header("Filtros")
+days = st.sidebar.slider("Rango de tiempo (días)", 1, 30, 3)
 
-# =========================================
-# CONTROLES INTERACTIVOS
-# =========================================
-st.sidebar.header("Opciones de consulta")
-rango = st.sidebar.slider("Seleccionar rango de datos a visualizar (minutos):", 10, 200, 60)
-variable = st.sidebar.selectbox("Variable a consultar:", ["Humedad", "Temperatura", "Vibración"])
+st.title(" Tablero de Monitoreo Industrial")
+st.write("Datos de sensores **DHT22** y **MPU6050**")
 
+# --- Función para consultar datos ---
+def query_data(measurement, fields):
+    fields_filter = " or ".join([f'r._field == "{f}"' for f in fields])
+    query = f'''
+    from(bucket: "{INFLUXDB_BUCKET}")
+      |> range(start: -{days}d)
+      |> filter(fn: (r) => r._measurement == "{measurement}")
+      |> filter(fn: (r) => {fields_filter})
+    '''
+    tables = query_api.query(org=INFLUXDB_ORG, query=query)
+    data = []
+    for table in tables:
+        for record in table.records:
+            data.append((record.get_time(), record.get_field(), record.get_value()))
 
-# =========================================
-# CONSULTA A INFLUXDB (MISMA QUE USABAS)
-# =========================================
-query = f'''
-from(bucket: "{bucket}")
-  |> range(start: -{rango}m)
-  |> filter(fn: (r) => r["_measurement"] == "SENSORES")
-  |> filter(fn: (r) => r["_field"] == "{variable}")
-'''
+    if not data:
+        return pd.DataFrame()
+    
+    df = pd.DataFrame(data, columns=["time", "field", "value"])
+    df = df.pivot(index="time", columns="field", values="value").reset_index()
+    return df
 
-result = query_api.query(org=org, query=query)
+# --- Sensor DHT22 ---
+st.subheader(" Sensor DHT22 (Temperatura y Humedad)")
+fields_dht = ["temperatura", "humedad", "sensacion_termica"]
+df_dht = query_data("studio-dht22", fields_dht)
 
-# Convertir resultado a DataFrame
-df = pd.DataFrame([record.values for table in result for record in table.records])
+if not df_dht.empty:
+    fig_dht = px.line(df_dht, x="time", y=fields_dht, title="Lecturas DHT22")
+    st.plotly_chart(fig_dht, use_container_width=True)
 
-if not df.empty:
-    df["_time"] = pd.to_datetime(df["_time"])
-    st.success(f"Datos recibidos correctamente: {len(df)} registros")
+    st.write("**Métricas DHT22**")
+    st.dataframe(df_dht.describe().T[["mean", "min", "max"]])
 else:
-    st.error("No se encontraron datos para el rango seleccionado.")
-    st.stop()
+    st.warning("No hay datos disponibles del sensor DHT22 para este rango de tiempo.")
 
+# --- Sensor MPU6050 ---
+st.subheader(" Sensor MPU6050 (Vibraciones y Aceleración)")
+fields_mpu = ["accel_x", "accel_y", "accel_z"]
+df_mpu = query_data("mpu6050", fields_mpu)
 
-# =========================================
-# GRÁFICA PRINCIPAL
-# =========================================
-fig = px.line(df, x="_time", y="_value", title=f"{variable} en el tiempo")
-st.plotly_chart(fig, use_container_width=True)
+if not df_mpu.empty:
+    fig_mpu = px.line(df_mpu, x="time", y=fields_mpu, title="Lecturas MPU6050")
+    st.plotly_chart(fig_mpu, use_container_width=True)
 
-
-# =========================================
-# REGRESIÓN LINEAL
-# =========================================
-df["t"] = np.arange(len(df)).reshape(-1, 1)
-model = LinearRegression().fit(df[["t"]], df["_value"])
-df["pred"] = model.pr
+    st.write("**Métricas MPU6050**")
+    st.dataframe(df_mpu.describe().T[["mean", "min", "max"]])
+else:
+    st.warning("No hay datos disponibles del sensor MPU6050 para este rango de tiempo.")
