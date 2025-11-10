@@ -56,7 +56,7 @@ end_date = st.sidebar.date_input("Fecha final:", value=end_date)
 start_ts = datetime.combine(start_date, datetime.min.time()).isoformat() + "Z"
 end_ts = datetime.combine(end_date, datetime.max.time()).isoformat() + "Z"
 
-st.title("📊 Tablero de Monitoreo Industrial")
+st.title("🔩 Tablero de Monitoreo Extreme Manufacturing")
 st.write("Sensores: **DHT22 (temperatura/humedad)** y **MPU6050 (vibración)**")
 
 # ==========================================================
