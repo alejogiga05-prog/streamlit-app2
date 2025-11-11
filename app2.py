@@ -148,4 +148,35 @@ if not df_mpu.empty:
 
     future_time_v = np.linspace(x_v[-1], x_v[-1] + 6 * 3600, 20)
     future_vib = m_v * future_time_v + b_v
-    future_df_v = pd.Dat
+    future_df_v = pd.DataFrame({
+        "time": pd.to_datetime(future_time_v, unit="s"),
+        "vibracion_proyectada": future_vib
+    })
+
+    # --- GRÁFICO ---
+    fig2 = go.Figure()
+    fig2.add_trace(go.Scatter(x=df_mpu["time"], y=df_mpu["vibration_avg"],
+                              mode="lines", name="Vibración real", line=dict(color="#2ECC71")))
+    fig2.add_trace(go.Scatter(x=future_df_v["time"], y=future_df_v["vibracion_proyectada"],
+                              mode="lines", name="Proyección 6h", line=dict(color="purple", dash="dot")))
+
+    fig2.update_layout(title="Vibración promedio y proyección (6h)",
+                       xaxis_title="Tiempo", yaxis_title="Intensidad")
+    st.plotly_chart(fig2, use_container_width=True)
+
+    # --- PREDICCIÓN NUMÉRICA ---
+    pred_vib_6h = future_vib[-1]
+    st.info(f"📊 **Vibración promedio proyectada en 6 horas:** {pred_vib_6h:.3f}")
+
+else:
+    st.warning("⚠ No hay datos del MPU6050 en este rango.")
+
+# ==========================================================
+# PIE DE PÁGINA
+# ==========================================================
+st.markdown("""
+---
+**Dashboard IoT Predictivo**  
+Desarrollado con ❤️ en Streamlit | InfluxDB + Plotly + Numpy  
+© 2025 - Proyecto académico de Alejandro Giraldo Garzón
+""")
