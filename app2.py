@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from influxdb_client import InfluxDBClient
 from datetime import datetime, timedelta
 import numpy as np
+from sklearn.linear_model import LinearRegression
 
 # ==========================================================
 # CONFIGURACIÓN DE LA PÁGINA
@@ -91,39 +92,27 @@ if not df_dht.empty:
     df_dht["timestamp_num"] = pd.to_datetime(df_dht["time"]).astype(int) / 10**9
     x = df_dht["timestamp_num"].values
     y = df_dht["temperatura"].values
-
-    # Ajuste lineal (y = m*x + b)
     m, b = np.polyfit(x, y, 1)
 
-    # Proyección de 6 horas hacia el futuro
     future_hours = 6
     future_time = np.linspace(x[-1], x[-1] + future_hours * 3600, 20)
     future_temp = m * future_time + b
 
-    # Combinar datos actuales y proyectados
     future_df = pd.DataFrame({
         "time": pd.to_datetime(future_time, unit="s"),
         "temperatura_proyectada": future_temp
     })
 
-    # --- GRÁFICO ---
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df_dht["time"], y=df_dht["temperatura"],
                              mode="lines+markers", name="Temperatura real", line=dict(color="#FF5733")))
     fig.add_trace(go.Scatter(x=future_df["time"], y=future_df["temperatura_proyectada"],
                              mode="lines", name="Proyección 6h", line=dict(color="blue", dash="dash")))
-
     fig.update_layout(title="Evolución y Proyección de Temperatura (6h)",
                       xaxis_title="Tiempo", yaxis_title="°C")
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- DATOS ---
-    st.write("📄 **Datos del sensor DHT22**")
-    st.dataframe(df_dht)
-
-    # --- PREDICCIÓN NUMÉRICA ---
-    pred_temp_6h = future_temp[-1]
-    st.info(f"📊 **Temperatura proyectada en 6 horas:** {pred_temp_6h:.2f} °C")
+    st.info(f"📊 **Temperatura proyectada en 6 horas:** {future_temp[-1]:.2f} °C")
 
 else:
     st.warning("⚠ No hay datos del DHT22 en este rango.")
@@ -140,43 +129,6 @@ if not df_mpu.empty:
     df_mpu["vibration_avg"] = df_mpu[["accel_x", "accel_y", "accel_z"]].mean(axis=1)
     df_mpu["vibration_trend"] = df_mpu["vibration_avg"].rolling(window=6).mean()
 
-    # --- PROYECCIÓN DE VIBRACIÓN ---
     df_mpu["timestamp_num"] = pd.to_datetime(df_mpu["time"]).astype(int) / 10**9
     x_v = df_mpu["timestamp_num"].values
-    y_v = df_mpu["vibration_avg"].values
-    m_v, b_v = np.polyfit(x_v, y_v, 1)
-
-    future_time_v = np.linspace(x_v[-1], x_v[-1] + 6 * 3600, 20)
-    future_vib = m_v * future_time_v + b_v
-    future_df_v = pd.DataFrame({
-        "time": pd.to_datetime(future_time_v, unit="s"),
-        "vibracion_proyectada": future_vib
-    })
-
-    # --- GRÁFICO ---
-    fig2 = go.Figure()
-    fig2.add_trace(go.Scatter(x=df_mpu["time"], y=df_mpu["vibration_avg"],
-                              mode="lines", name="Vibración real", line=dict(color="#2ECC71")))
-    fig2.add_trace(go.Scatter(x=future_df_v["time"], y=future_df_v["vibracion_proyectada"],
-                              mode="lines", name="Proyección 6h", line=dict(color="purple", dash="dot")))
-
-    fig2.update_layout(title="Vibración promedio y proyección (6h)",
-                       xaxis_title="Tiempo", yaxis_title="Intensidad")
-    st.plotly_chart(fig2, use_container_width=True)
-
-    # --- PREDICCIÓN NUMÉRICA ---
-    pred_vib_6h = future_vib[-1]
-    st.info(f"📊 **Vibración promedio proyectada en 6 horas:** {pred_vib_6h:.3f}")
-
-else:
-    st.warning("⚠ No hay datos del MPU6050 en este rango.")
-
-# ==========================================================
-# PIE DE PÁGINA
-# ==========================================================
-st.markdown("""
----
-**Dashboard IoT Predictivo**  
-Desarrollado con ❤️ en Streamlit | InfluxDB + Plotly + Numpy  
-© 2025 - Proyecto académico de Alejandro Giraldo Garzón
-""")
+    y_v = df_mpu["vibrati]()
