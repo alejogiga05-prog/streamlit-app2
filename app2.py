@@ -131,4 +131,4 @@ if not df_mpu.empty:
 
     df_mpu["timestamp_num"] = pd.to_datetime(df_mpu["time"]).astype(int) / 10**9
     x_v = df_mpu["timestamp_num"].values
-    y_v = df_mpu["vibrati]()
+    y_v = df_mpu["vibration"]()
