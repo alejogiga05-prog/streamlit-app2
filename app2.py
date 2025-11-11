@@ -4,27 +4,25 @@ import plotly.express as px
 import plotly.graph_objects as go
 from influxdb_client import InfluxDBClient
 from datetime import datetime, timedelta
+import numpy as np
 
 # ==========================================================
 # CONFIGURACIÓN DE LA PÁGINA
 # ==========================================================
 st.set_page_config(
-    page_title="Dashboard Industrial",
+    page_title="Dashboard Industrial Predictivo",
     layout="wide",
-    page_icon="🔧"
+    page_icon="📊"
 )
 
-# ==========================================================
-# ENCABEZADO VISUAL
-# ==========================================================
 st.markdown("""
-<h1 style='text-align:center; color:#0A81AB;'>🔩 Dashboard de Monitoreo - Extreme Manufacturing</h1>
-<p style='text-align:center;'>Visualización en tiempo real de sensores DHT22 y MPU6050</p>
+<h1 style='text-align:center; color:#0A81AB;'>🔩 Dashboard Predictivo - Extreme Manufacturing</h1>
+<p style='text-align:center;'>Monitoreo y proyección de sensores DHT22 (temperatura/humedad) y MPU6050 (vibración)</p>
 <hr style="border:1px solid #ccc;">
 """, unsafe_allow_html=True)
 
 # ==========================================================
-# 🔒 CREDENCIALES
+# CREDENCIALES
 # ==========================================================
 INFLUXDB_URL = st.secrets["INFLUXDB_URL"]
 INFLUXDB_TOKEN = st.secrets["INFLUXDB_TOKEN"]
@@ -35,7 +33,7 @@ client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG
 query_api = client.query_api()
 
 # ==========================================================
-# 📥 FUNCIÓN PARA CONSULTAR DATOS
+# FUNCIÓN PARA CONSULTAR DATOS
 # ==========================================================
 @st.cache_data(ttl=300)
 def query_data(measurement, fields, start, end):
@@ -47,6 +45,7 @@ def query_data(measurement, fields, start, end):
       |> filter(fn: (r) => r._measurement == "{measurement}")
       |> filter(fn: (r) => {fields_filter})
     """
+
     tables = query_api.query(org=INFLUXDB_ORG, query=query)
     data = [(record.get_time(), record.get_field(), record.get_value())
             for table in tables for record in table.records]
@@ -59,7 +58,7 @@ def query_data(measurement, fields, start, end):
     return df
 
 # ==========================================================
-# 🎚 CONTROLES LATERALES
+# CONTROLES LATERALES
 # ==========================================================
 st.sidebar.header("🎛️ Filtros")
 
@@ -70,12 +69,8 @@ end_date = st.sidebar.date_input("📅 Fecha final", value=end_date)
 start_ts = datetime.combine(start_date, datetime.min.time()).isoformat() + "Z"
 end_ts = datetime.combine(end_date, datetime.max.time()).isoformat() + "Z"
 
-st.sidebar.markdown("---")
-st.sidebar.write("Creado por **Alejandro Giraldo Garzón** 🧠")
-st.sidebar.markdown("---")
-
 # ==========================================================
-# 🌡 SENSOR DHT22
+# SENSOR DHT22
 # ==========================================================
 st.subheader("🌡 Sensor DHT22 - Temperatura / Humedad")
 
@@ -85,44 +80,56 @@ df_dht = query_data("studio-dht22", fields_dht, start_ts, end_ts)
 if not df_dht.empty:
     df_dht["temp_trend"] = df_dht["temperatura"].rolling(window=5).mean()
 
+    # --- MÉTRICAS ---
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("🌞 Temp actual", f"{df_dht['temperatura'].iloc[-1]:.2f} °C")
     col2.metric("🌡 Promedio", f"{df_dht['temperatura'].mean():.2f} °C")
     col3.metric("📉 Mínimo", f"{df_dht['temperatura'].min():.2f} °C")
     col4.metric("📈 Máximo", f"{df_dht['temperatura'].max():.2f} °C")
 
-    # Línea de temperatura
-    fig = px.line(
-        df_dht, x="time", y=["temperatura", "temp_trend"],
-        title="Evolución de la Temperatura (Promedio móvil)",
-        color_discrete_sequence=["#FF5733", "#2E86C1"]
-    )
-    fig.update_traces(mode="lines+markers")
+    # --- PROYECCIÓN DE TEMPERATURA ---
+    df_dht["timestamp_num"] = pd.to_datetime(df_dht["time"]).astype(int) / 10**9
+    x = df_dht["timestamp_num"].values
+    y = df_dht["temperatura"].values
+
+    # Ajuste lineal (y = m*x + b)
+    m, b = np.polyfit(x, y, 1)
+
+    # Proyección de 6 horas hacia el futuro
+    future_hours = 6
+    future_time = np.linspace(x[-1], x[-1] + future_hours * 3600, 20)
+    future_temp = m * future_time + b
+
+    # Combinar datos actuales y proyectados
+    future_df = pd.DataFrame({
+        "time": pd.to_datetime(future_time, unit="s"),
+        "temperatura_proyectada": future_temp
+    })
+
+    # --- GRÁFICO ---
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df_dht["time"], y=df_dht["temperatura"],
+                             mode="lines+markers", name="Temperatura real", line=dict(color="#FF5733")))
+    fig.add_trace(go.Scatter(x=future_df["time"], y=future_df["temperatura_proyectada"],
+                             mode="lines", name="Proyección 6h", line=dict(color="blue", dash="dash")))
+
+    fig.update_layout(title="Evolución y Proyección de Temperatura (6h)",
+                      xaxis_title="Tiempo", yaxis_title="°C")
     st.plotly_chart(fig, use_container_width=True)
 
-    # Histograma
-    fig_hist = px.histogram(df_dht, x="temperatura", nbins=20, title="Distribución de Temperaturas", color_discrete_sequence=["#E67E22"])
-    st.plotly_chart(fig_hist, use_container_width=True)
-
-    # Gauge indicador
-    gauge = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=df_dht["temperatura"].iloc[-1],
-        title={'text': "Temperatura Actual"},
-        gauge={'axis': {'range': [0, 50]}, 'bar': {'color': "#FF5733"}},
-    ))
-    st.plotly_chart(gauge, use_container_width=True)
-
+    # --- DATOS ---
     st.write("📄 **Datos del sensor DHT22**")
     st.dataframe(df_dht)
 
-    st.download_button("⬇ Descargar datos DHT22", df_dht.to_csv().encode("utf-8"), "DHT22.csv")
+    # --- PREDICCIÓN NUMÉRICA ---
+    pred_temp_6h = future_temp[-1]
+    st.info(f"📊 **Temperatura proyectada en 6 horas:** {pred_temp_6h:.2f} °C")
 
 else:
     st.warning("⚠ No hay datos del DHT22 en este rango.")
 
 # ==========================================================
-# 📈 SENSOR MPU6050
+# SENSOR MPU6050
 # ==========================================================
 st.subheader("📈 Sensor MPU6050 - Aceleración / Vibración")
 
@@ -133,52 +140,12 @@ if not df_mpu.empty:
     df_mpu["vibration_avg"] = df_mpu[["accel_x", "accel_y", "accel_z"]].mean(axis=1)
     df_mpu["vibration_trend"] = df_mpu["vibration_avg"].rolling(window=6).mean()
 
-    # Promedio móvil de vibración
-    fig2 = px.line(df_mpu, x="time", y=["vibration_avg", "vibration_trend"],
-                   title="Vibración (Promedio móvil)",
-                   color_discrete_sequence=["#2ECC71", "#1ABC9C"])
-    st.plotly_chart(fig2, use_container_width=True)
+    # --- PROYECCIÓN DE VIBRACIÓN ---
+    df_mpu["timestamp_num"] = pd.to_datetime(df_mpu["time"]).astype(int) / 10**9
+    x_v = df_mpu["timestamp_num"].values
+    y_v = df_mpu["vibration_avg"].values
+    m_v, b_v = np.polyfit(x_v, y_v, 1)
 
-    # Dispersión entre ejes
-    fig_scatter = px.scatter_3d(
-        df_mpu, x="accel_x", y="accel_y", z="accel_z",
-        color="vibration_avg",
-        title="Distribución 3D de Aceleraciones",
-        color_continuous_scale="Viridis"
-    )
-    st.plotly_chart(fig_scatter, use_container_width=True)
-
-    st.write("📄 **Datos del sensor MPU6050**")
-    st.dataframe(df_mpu)
-
-    st.download_button("⬇ Descargar datos MPU6050", df_mpu.to_csv().encode("utf-8"), "MPU6050.csv")
-
-else:
-    st.warning("⚠ No hay datos del MPU6050 en este rango.")
-
-# ==========================================================
-# 🔄 COMPARACIÓN ENTRE SENSORES
-# ==========================================================
-if not df_dht.empty and not df_mpu.empty:
-    st.subheader("📊 Comparativa: Temperatura vs Vibración")
-
-    df_compare = pd.DataFrame({
-        "time": df_dht["time"],
-        "temperatura": df_dht["temperatura"],
-        "vibración": df_mpu["vibration_avg"].reindex_like(df_dht)
-    }).dropna()
-
-    fig_compare = px.scatter(df_compare, x="temperatura", y="vibración",
-                             trendline="ols", title="Relación entre Temperatura y Vibración",
-                             color_discrete_sequence=["#9B59B6"])
-    st.plotly_chart(fig_compare, use_container_width=True)
-
-# ==========================================================
-# 🧾 PIE DE PÁGINA
-# ==========================================================
-st.markdown("""
----
-**Dashboard IoT Industrial**  
-Desarrollado con ❤️ en Streamlit | Powered by InfluxDB & Plotly  
-© 2025 - Proyecto académico de Alejandro Giraldo Garzón
-""")
+    future_time_v = np.linspace(x_v[-1], x_v[-1] + 6 * 3600, 20)
+    future_vib = m_v * future_time_v + b_v
+    future_df_v = pd.Dat
