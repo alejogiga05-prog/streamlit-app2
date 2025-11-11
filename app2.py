@@ -1,13 +1,30 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from influxdb_client import InfluxDBClient
 from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Dashboard Industrial", layout="wide")
+# ==========================================================
+# CONFIGURACIÓN DE LA PÁGINA
+# ==========================================================
+st.set_page_config(
+    page_title="Dashboard Industrial",
+    layout="wide",
+    page_icon="🔧"
+)
 
 # ==========================================================
-# 🔒 Credenciales desde secrets.toml (Streamlit Cloud)
+# ENCABEZADO VISUAL
+# ==========================================================
+st.markdown("""
+<h1 style='text-align:center; color:#0A81AB;'>🔩 Dashboard de Monitoreo - Extreme Manufacturing</h1>
+<p style='text-align:center;'>Visualización en tiempo real de sensores DHT22 y MPU6050</p>
+<hr style="border:1px solid #ccc;">
+""", unsafe_allow_html=True)
+
+# ==========================================================
+# 🔒 CREDENCIALES
 # ==========================================================
 INFLUXDB_URL = st.secrets["INFLUXDB_URL"]
 INFLUXDB_TOKEN = st.secrets["INFLUXDB_TOKEN"]
@@ -18,7 +35,7 @@ client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG
 query_api = client.query_api()
 
 # ==========================================================
-# 📥 Función para consultar datos
+# 📥 FUNCIÓN PARA CONSULTAR DATOS
 # ==========================================================
 @st.cache_data(ttl=300)
 def query_data(measurement, fields, start, end):
@@ -30,7 +47,6 @@ def query_data(measurement, fields, start, end):
       |> filter(fn: (r) => r._measurement == "{measurement}")
       |> filter(fn: (r) => {fields_filter})
     """
-
     tables = query_api.query(org=INFLUXDB_ORG, query=query)
     data = [(record.get_time(), record.get_field(), record.get_value())
             for table in tables for record in table.records]
@@ -43,21 +59,20 @@ def query_data(measurement, fields, start, end):
     return df
 
 # ==========================================================
-# 🎚 Controles laterales
+# 🎚 CONTROLES LATERALES
 # ==========================================================
-st.sidebar.header("Filtros")
+st.sidebar.header("🎛️ Filtros")
 
 end_date = datetime.now()
-start_date = st.sidebar.date_input(
-    "Fecha inicial:", value=end_date - timedelta(days=3)
-)
-end_date = st.sidebar.date_input("Fecha final:", value=end_date)
+start_date = st.sidebar.date_input("📅 Fecha inicial", value=end_date - timedelta(days=3))
+end_date = st.sidebar.date_input("📅 Fecha final", value=end_date)
 
 start_ts = datetime.combine(start_date, datetime.min.time()).isoformat() + "Z"
 end_ts = datetime.combine(end_date, datetime.max.time()).isoformat() + "Z"
 
-st.title("🔩 Tablero de Monitoreo Extreme Manufacturing")
-st.write("Sensores: **DHT22 (temperatura/humedad)** y **MPU6050 (vibración)**")
+st.sidebar.markdown("---")
+st.sidebar.write("Creado por **Alejandro Giraldo Garzón** 🧠")
+st.sidebar.markdown("---")
 
 # ==========================================================
 # 🌡 SENSOR DHT22
@@ -71,28 +86,43 @@ if not df_dht.empty:
     df_dht["temp_trend"] = df_dht["temperatura"].rolling(window=5).mean()
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Temp actual", f"{df_dht['temperatura'].iloc[-1]:.2f} °C")
-    col2.metric("Temp promedio", f"{df_dht['temperatura'].mean():.2f} °C")
-    col3.metric("Temp min", f"{df_dht['temperatura'].min():.2f} °C")
-    col4.metric("Temp max", f"{df_dht['temperatura'].max():.2f} °C")
+    col1.metric("🌞 Temp actual", f"{df_dht['temperatura'].iloc[-1]:.2f} °C")
+    col2.metric("🌡 Promedio", f"{df_dht['temperatura'].mean():.2f} °C")
+    col3.metric("📉 Mínimo", f"{df_dht['temperatura'].min():.2f} °C")
+    col4.metric("📈 Máximo", f"{df_dht['temperatura'].max():.2f} °C")
 
-    fig = px.line(df_dht, x="time", y=["temperatura", "temp_trend"],
-                  title="Temperatura (Tendencia con promedio móvil)")
+    # Línea de temperatura
+    fig = px.line(
+        df_dht, x="time", y=["temperatura", "temp_trend"],
+        title="Evolución de la Temperatura (Promedio móvil)",
+        color_discrete_sequence=["#FF5733", "#2E86C1"]
+    )
+    fig.update_traces(mode="lines+markers")
     st.plotly_chart(fig, use_container_width=True)
 
-    st.write("📄 Datos del sensor DHT22")
+    # Histograma
+    fig_hist = px.histogram(df_dht, x="temperatura", nbins=20, title="Distribución de Temperaturas", color_discrete_sequence=["#E67E22"])
+    st.plotly_chart(fig_hist, use_container_width=True)
+
+    # Gauge indicador
+    gauge = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=df_dht["temperatura"].iloc[-1],
+        title={'text': "Temperatura Actual"},
+        gauge={'axis': {'range': [0, 50]}, 'bar': {'color': "#FF5733"}},
+    ))
+    st.plotly_chart(gauge, use_container_width=True)
+
+    st.write("📄 **Datos del sensor DHT22**")
     st.dataframe(df_dht)
 
-    st.download_button(
-        "⬇ Descargar datos DHT22",
-        df_dht.to_csv().encode("utf-8"),
-        "DHT22.csv",
-    )
+    st.download_button("⬇ Descargar datos DHT22", df_dht.to_csv().encode("utf-8"), "DHT22.csv")
+
 else:
     st.warning("⚠ No hay datos del DHT22 en este rango.")
 
 # ==========================================================
-# SENSOR MPU6050
+# 📈 SENSOR MPU6050
 # ==========================================================
 st.subheader("📈 Sensor MPU6050 - Aceleración / Vibración")
 
@@ -103,23 +133,52 @@ if not df_mpu.empty:
     df_mpu["vibration_avg"] = df_mpu[["accel_x", "accel_y", "accel_z"]].mean(axis=1)
     df_mpu["vibration_trend"] = df_mpu["vibration_avg"].rolling(window=6).mean()
 
-    fig2 = px.line(df_mpu, x="time",
-                   y=["vibration_avg", "vibration_trend"],
-                   title="Vibración (Promedio móvil)")
-
+    # Promedio móvil de vibración
+    fig2 = px.line(df_mpu, x="time", y=["vibration_avg", "vibration_trend"],
+                   title="Vibración (Promedio móvil)",
+                   color_discrete_sequence=["#2ECC71", "#1ABC9C"])
     st.plotly_chart(fig2, use_container_width=True)
 
-    st.write("📄 Datos del sensor MPU6050")
+    # Dispersión entre ejes
+    fig_scatter = px.scatter_3d(
+        df_mpu, x="accel_x", y="accel_y", z="accel_z",
+        color="vibration_avg",
+        title="Distribución 3D de Aceleraciones",
+        color_continuous_scale="Viridis"
+    )
+    st.plotly_chart(fig_scatter, use_container_width=True)
+
+    st.write("📄 **Datos del sensor MPU6050**")
     st.dataframe(df_mpu)
 
-    st.download_button(
-        "⬇ Descargar datos MPU6050",
-        df_mpu.to_csv().encode("utf-8"),
-        "MPU6050.csv",
-    )
+    st.download_button("⬇ Descargar datos MPU6050", df_mpu.to_csv().encode("utf-8"), "MPU6050.csv")
+
 else:
     st.warning("⚠ No hay datos del MPU6050 en este rango.")
 
-st.success("✅ Dashboard actualizado correctamente")
+# ==========================================================
+# 🔄 COMPARACIÓN ENTRE SENSORES
+# ==========================================================
+if not df_dht.empty and not df_mpu.empty:
+    st.subheader("📊 Comparativa: Temperatura vs Vibración")
 
+    df_compare = pd.DataFrame({
+        "time": df_dht["time"],
+        "temperatura": df_dht["temperatura"],
+        "vibración": df_mpu["vibration_avg"].reindex_like(df_dht)
+    }).dropna()
 
+    fig_compare = px.scatter(df_compare, x="temperatura", y="vibración",
+                             trendline="ols", title="Relación entre Temperatura y Vibración",
+                             color_discrete_sequence=["#9B59B6"])
+    st.plotly_chart(fig_compare, use_container_width=True)
+
+# ==========================================================
+# 🧾 PIE DE PÁGINA
+# ==========================================================
+st.markdown("""
+---
+**Dashboard IoT Industrial**  
+Desarrollado con ❤️ en Streamlit | Powered by InfluxDB & Plotly  
+© 2025 - Proyecto académico de Alejandro Giraldo Garzón
+""")
